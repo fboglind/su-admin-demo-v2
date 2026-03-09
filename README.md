@@ -2,7 +2,6 @@
 
 A web application for exploring and interacting with automated classification of Swedish university courses into disciplinary domains (*utbildningsområden*, UO).
 
-Built as a demonstration of applied NLP, semantic search, and full-stack development.
 
 **Models & data:** [Zenodo DOI: 10.5281/zenodo.18256018](https://zenodo.org/records/18256018)
 
@@ -10,7 +9,7 @@ Built as a demonstration of applied NLP, semantic search, and full-stack develop
 
 1. **Classification Tool** — Paste a course description, get predicted UO distribution (TF-IDF live + pre-computed BERT comparison)
 2. **Model Comparison** — Side-by-side view of baseline vs BERT predictions across the validation set
-3. **Semantic Search** — Natural language search over 9,770 course plans using ChromaDB
+3. **Semantic Search** — Natural language search over 9,770 course plans using ChromaDB [Work in progress]
 4. **Corpus Explorer** — Browse, filter, and inspect the full course corpus
 
 ## Architecture
@@ -97,7 +96,3 @@ Or use the `render.yaml` blueprint for one-click deploy.
 - **Pre-computed BERT predictions** — binary + distributional, stored in parquet
 - **Corpus browser** — filter by UO, search text, paginated
 
-### What requires additional setup
-
-- **Semantic search** — needs ChromaDB + sentence-transformers (~1GB RAM, paid tier)
-- **Live BERT inference** — needs transformers + torch (~2GB RAM)
