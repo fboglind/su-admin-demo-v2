@@ -1,0 +1,15 @@
+flask>=3.0
+flask-cors>=4.0
+pandas>=2.0
+pyarrow>=14.0
+numpy>=1.24
+scikit-learn>=1.3
+joblib>=1.3
+
+# For semantic search (optional, needed for /api/search)
+chromadb>=0.4
+sentence-transformers>=2.2
+
+# For BERT pre-computation only (not needed at runtime if pre-computed)
+# transformers>=4.35
+# torch>=2.0

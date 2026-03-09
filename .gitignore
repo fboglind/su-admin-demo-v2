@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+
+# Build output
+frontend/dist/
+
+# Data & models (downloaded separately)
+backend/models/
+backend/data/*.parquet
+backend/data/chroma_db/
+backend/data/preprocessed/
+backend/data/corpus_raw.csv
+backend/data/corpus_stats.json
+scripts/downloads/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
