@@ -47,7 +47,7 @@ export default function Search() {
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Semantic Search</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Semantic Search [coming soon]</h1>
         <p className="text-gray-500 mt-1">
           Search course descriptions by meaning using KB-BERT embeddings and ChromaDB.
         </p>

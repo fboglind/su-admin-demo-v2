@@ -18,6 +18,8 @@ import pandas as pd
 import joblib
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # ─── Configuration ────────────────────────────────────────
 
@@ -41,7 +43,14 @@ UO_CODES = sorted(UO_META.keys())
 
 # ─── App setup ────────────────────────────────────────────
 
-app = Flask(__name__)
+# In production, serve the built React frontend
+STATIC_DIR = Path(__file__).parent / "static"
+
+if STATIC_DIR.exists():
+    app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
+else:
+    app = Flask(__name__)
+
 CORS(app)  # Allow React dev server
 
 # ─── Load resources at startup ────────────────────────────
@@ -51,11 +60,14 @@ tfidf_model = None
 chroma_collection = None
 label_list = None
 sentence_embedder = None
+corpus_tfidf_matrix = None      # TF-IDF vectors for corpus similarity search
+corpus_vectorizer = None         # Vectorizer for transforming new queries
 
 
 def load_resources():
     """Load corpus, models, and ChromaDB at startup."""
     global corpus_df, tfidf_model, chroma_collection, label_list, sentence_embedder
+    global corpus_tfidf_matrix, corpus_vectorizer
 
     # 1. Load corpus
     corpus_path = DATA_DIR / "corpus.parquet"
@@ -75,11 +87,10 @@ def load_resources():
         for f in all_files[:20]:
             print(f"    {f}")
 
-        joblib_files = list(tfidf_dir.rglob("svc_pipe.joblib"))
+        joblib_files = list(tfidf_dir.rglob("svc_pipe*.joblib"))
         if not joblib_files:
-            print(f"⚠ No svc_pipe.joblib found under {tfidf_dir}")
-            # Also try any .joblib file
-            any_joblib = list(tfidf_dir.rglob("svc_pipe*.joblib"))
+            print(f"⚠ No svc_pipe*.joblib found under {tfidf_dir}")
+            any_joblib = list(tfidf_dir.rglob("*.joblib"))
             if any_joblib:
                 print(f"  Found other .joblib files: {[str(f) for f in any_joblib]}")
         else:
@@ -122,6 +133,21 @@ def load_resources():
 
     # 4. Sentence embedder (loaded lazily on first search)
     print("  Sentence embedder will load on first search request")
+
+    # 5. Build corpus similarity index (lightweight fallback for nearest-match search)
+    #    This lets /api/classify work even without ChromaDB or the TF-IDF classifier
+    if corpus_df is not None:
+        print("  Building corpus similarity index...")
+        texts = corpus_df["text"].fillna("").tolist()
+        corpus_vectorizer = TfidfVectorizer(
+            analyzer="char_wb",
+            ngram_range=(3, 5),
+            min_df=3,
+            max_df=0.9,
+            max_features=50000,  # cap features for speed
+        )
+        corpus_tfidf_matrix = corpus_vectorizer.fit_transform(texts)
+        print(f"✓ Corpus similarity index built: {corpus_tfidf_matrix.shape}")
 
 
 # ─── Helpers ──────────────────────────────────────────────
@@ -178,6 +204,22 @@ def get_sentence_embedder():
     return sentence_embedder
 
 
+def find_nearest_in_corpus(text, n=5):
+    """Find nearest corpus matches using TF-IDF cosine similarity.
+    
+    Works without ChromaDB — uses the lightweight corpus index built at startup.
+    Returns list of (corpus_index, similarity_score) tuples.
+    """
+    if corpus_vectorizer is None or corpus_tfidf_matrix is None:
+        return []
+
+    query_vec = corpus_vectorizer.transform([text])
+    similarities = cosine_similarity(query_vec, corpus_tfidf_matrix).flatten()
+    top_indices = similarities.argsort()[::-1][:n]
+
+    return [(int(idx), float(similarities[idx])) for idx in top_indices]
+
+
 # ─── API Routes ───────────────────────────────────────────
 
 @app.route("/api/debug", methods=["GET"])
@@ -192,6 +234,8 @@ def debug_status():
         "label_list": [int(x) for x in label_list] if label_list is not None else None,
         "chroma_loaded": chroma_collection is not None,
         "chroma_count": chroma_collection.count() if chroma_collection is not None else 0,
+        "corpus_index_loaded": corpus_tfidf_matrix is not None,
+        "corpus_index_shape": list(corpus_tfidf_matrix.shape) if corpus_tfidf_matrix is not None else None,
         "model_dir": str(MODEL_DIR.resolve()),
         "model_dir_exists": MODEL_DIR.exists(),
         "data_dir": str(DATA_DIR.resolve()),
@@ -231,7 +275,7 @@ def get_uo_meta():
 
 @app.route("/api/classify", methods=["POST"])
 def classify_text():
-    """Classify new text with TF-IDF (live) and find nearest BERT match."""
+    """Classify new text with TF-IDF (live) and find nearest corpus matches."""
     data = request.get_json()
     text = data.get("text", "").strip()
 
@@ -242,7 +286,7 @@ def classify_text():
 
     result = {"text_length": len(text), "models": {}}
 
-    # 1. TF-IDF live prediction
+    # 1. TF-IDF live prediction (if classifier model is loaded)
     if tfidf_model is not None:
         Y_pred = tfidf_model.predict([text])
         tfidf_labels = {}
@@ -254,57 +298,95 @@ def classify_text():
             "live": True,
         }
 
-    # 2. Find nearest corpus match via ChromaDB
+    # 2. Find nearest corpus matches (ChromaDB → TF-IDF fallback)
+    nearest = []
+    search_method = None
+
+    # 2a. Try ChromaDB first (semantic search)
     if chroma_collection is not None:
         try:
             embedder = get_sentence_embedder()
             query_embedding = embedder.encode([text], normalize_embeddings=True)
-            results = chroma_collection.query(
+            chroma_results = chroma_collection.query(
                 query_embeddings=query_embedding.tolist(),
                 n_results=5,
             )
-
-            nearest = []
             for i, (doc_id, distance, doc, meta) in enumerate(zip(
-                results["ids"][0],
-                results["distances"][0],
-                results["documents"][0],
-                results["metadatas"][0],
+                chroma_results["ids"][0],
+                chroma_results["distances"][0],
+                chroma_results["documents"][0],
+                chroma_results["metadatas"][0],
             )):
                 corpus_idx = int(meta.get("corpus_idx", doc_id))
                 if corpus_df is not None and corpus_idx < len(corpus_df):
-                    row = corpus_df.iloc[corpus_idx]
-                    course = format_course(row, corpus_idx)
+                    course = format_course(corpus_df.iloc[corpus_idx], corpus_idx)
                 else:
                     course = {"text": doc[:300]}
-
                 nearest.append({
                     "rank": i + 1,
-                    "similarity": round(1 - distance, 4),  # cosine distance → similarity
+                    "similarity": round(1 - distance, 4),
                     "course": course,
                 })
-
-            result["nearest_matches"] = nearest
-
-            # Use top match's BERT predictions as "BERT suggestion"
-            if nearest and corpus_df is not None:
-                top_idx = int(results["metadatas"][0][0].get("corpus_idx", 0))
-                top_row = corpus_df.iloc[top_idx]
-                for prefix, key in [
-                    ("bert_binary_pred", "bert_binary"),
-                    ("bert_distributional_pct", "bert_dist"),
-                ]:
-                    preds = format_predictions(top_row, prefix)
-                    if preds:
-                        result["models"][key] = {
-                            "predictions": preds,
-                            "type": "binary" if "binary" in prefix else "distributional",
-                            "live": False,
-                            "source": f"nearest match (similarity: {nearest[0]['similarity']:.3f})",
-                        }
-
+            search_method = "semantic (ChromaDB)"
         except Exception as e:
             result["search_error"] = str(e)
+
+    # 2b. Fallback: TF-IDF corpus similarity search
+    if not nearest and corpus_df is not None:
+        matches = find_nearest_in_corpus(text, n=5)
+        for rank, (corpus_idx, sim) in enumerate(matches, 1):
+            course = format_course(corpus_df.iloc[corpus_idx], corpus_idx)
+            nearest.append({
+                "rank": rank,
+                "similarity": round(sim, 4),
+                "course": course,
+            })
+        search_method = "text similarity (TF-IDF cosine)"
+
+    if nearest:
+        result["nearest_matches"] = nearest
+        result["search_method"] = search_method
+
+        # 3. Extract pre-computed predictions from the top match
+        top_idx = nearest[0]["course"].get("idx")
+        if top_idx is not None and corpus_df is not None and top_idx < len(corpus_df):
+            top_row = corpus_df.iloc[top_idx]
+            top_sim = nearest[0]["similarity"]
+
+            # TF-IDF predictions from corpus (if live model not available)
+            if "tfidf" not in result["models"]:
+                preds = format_predictions(top_row, "tfidf_pred")
+                if preds:
+                    result["models"]["tfidf"] = {
+                        "predictions": preds,
+                        "type": "binary",
+                        "live": False,
+                        "source": f"nearest match ({search_method}, sim: {top_sim:.3f})",
+                    }
+
+            # BERT binary predictions from corpus
+            preds = format_predictions(top_row, "bert_binary_pred")
+            if preds:
+                result["models"]["bert_binary"] = {
+                    "predictions": preds,
+                    "type": "binary",
+                    "live": False,
+                    "source": f"nearest match ({search_method}, sim: {top_sim:.3f})",
+                }
+
+            # BERT distributional predictions from corpus
+            dist = {}
+            for uo_code in UO_CODES:
+                col = f"bert_distributional_pct_{uo_code}"
+                if col in top_row.index and pd.notna(top_row[col]):
+                    dist[uo_code] = float(top_row[col])
+            if dist:
+                result["models"]["bert_dist"] = {
+                    "predictions": dist,
+                    "type": "distributional",
+                    "live": False,
+                    "source": f"nearest match ({search_method}, sim: {top_sim:.3f})",
+                }
 
     return jsonify(result)
 
@@ -457,8 +539,27 @@ def compare_models():
     })
 
 
+# ─── Frontend catch-all (must be AFTER all /api routes) ───
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_frontend(path):
+    """Serve React frontend — lets React Router handle client-side routes."""
+    if path.startswith("api/"):
+        return jsonify({"error": "Not found"}), 404
+    if STATIC_DIR.exists():
+        file_path = STATIC_DIR / path
+        if file_path.is_file():
+            return app.send_static_file(path)
+        return app.send_static_file("index.html")
+    return "Frontend not built. Run: cd frontend && npm run build", 404
+
+
 # ─── Main ─────────────────────────────────────────────────
 
+import os
+load_resources()
+
 if __name__ == "__main__":
-    load_resources()
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, host="0.0.0.0", port=port)

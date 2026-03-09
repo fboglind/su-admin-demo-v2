@@ -5,24 +5,32 @@ __pycache__/
 
 # Build output
 frontend/dist/
+backend/static/
 
-# Data & models (downloaded separately)
-backend/models/
-backend/data/*.parquet
+# Large BERT model checkpoints (not needed at runtime)
+backend/models/bert_binary/
+backend/models/bert_distributional/
+
+# ChromaDB index (rebuild locally)
 backend/data/chroma_db/
+
+# Raw/intermediate data
 backend/data/preprocessed/
 backend/data/corpus_raw.csv
-backend/data/corpus_stats.json
+backend/data/corpus_before_fix.parquet
 scripts/downloads/
+
+# Keep these (needed for deployment):
+# backend/data/corpus.parquet
+# backend/models/tfidf_baseline/
 
 # Environment
 .env
 .venv/
 venv/
+adm-env/
 
 # IDE
 .vscode/
 .idea/
 *.swp
-*.un~
-*tmp

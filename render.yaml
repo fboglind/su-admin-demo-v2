@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: su-admin-classifier
+    runtime: python
+    buildCommand: "./build.sh"
+    startCommand: "cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120"
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.11.6"
+      - key: NODE_VERSION
+        value: "20"
+    plan: free
