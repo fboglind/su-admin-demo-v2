@@ -2,7 +2,7 @@
 
 A web application for exploring and interacting with automated classification of Swedish university courses into disciplinary domains (*utbildningsområden*, UO).
 
-Built as a demonstration of applied NLP, semantic search, and full-stack development.
+Built as a demonstration of applied NLP, and full-stack development.
 
 **Models & data:** [Zenodo DOI: 10.5281/zenodo.18256018](https://zenodo.org/records/18256018)
 
@@ -10,14 +10,13 @@ Built as a demonstration of applied NLP, semantic search, and full-stack develop
 
 1. **Classification Tool** — Paste a course description, get predicted UO distribution (TF-IDF live + pre-computed BERT comparison)
 2. **Model Comparison** — Side-by-side view of baseline vs BERT predictions across the validation set
-3. **Semantic Search** — Natural language search over 9,770 course plans using ChromaDB
+3. ~~**Semantic Search** — Natural language search over 9,770 course plans using ChromaDB~~ [Not yet]
 4. **Corpus Explorer** — Browse, filter, and inspect the full course corpus
 
 ## Architecture
 
 ```
-React (Vite)  ←→  Flask API  ←→  TF-IDF model (live)
-                                  ChromaDB (vector search)
+React (Vite) |  Flask API  |  TF-IDF model (live)
                                   Pre-computed BERT predictions
 ```
 
@@ -36,7 +35,7 @@ python download_zenodo.py
 python precompute.py
 ```
 
-This runs once (~30-60 min on CPU). Generates:
+Generates:
 - `backend/data/corpus.parquet` — full corpus with all predictions
 - `backend/data/chroma_db/` — vector index for semantic search
 
@@ -57,21 +56,6 @@ npm run dev
 ```
 
 Open http://localhost:5173
-
-## UO Categories
-
-| Code | Abbr | Name (Swedish) | Name (English) |
-|------|------|----------------|----------------|
-| 2434 | HU | Humaniora | Humanities |
-| 2436 | JU | Juridik | Law |
-| 2438 | LU | Lärarutbildning | Teacher Education |
-| 2439 | ME | Medicin | Medicine |
-| 2441 | NA | Naturvetenskap | Natural Science |
-| 2442 | SA | Samhällsvetenskap | Social Sciences |
-| 2444 | TE | Teknik | Technology |
-| 2445 | VÅ | Vård | Health Care |
-| 2447 | ÖV | Övrigt | Other |
-| 2451 | VU | Verksamhetsförlagd utb. | Work-based Education |
 
 ## Tech Stack
 
