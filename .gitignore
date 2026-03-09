@@ -34,3 +34,5 @@ adm-env/
 .vscode/
 .idea/
 *.swp
+*.un~
+*tmp
